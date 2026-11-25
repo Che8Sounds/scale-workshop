@@ -2,7 +2,7 @@
 // Fork-only file: upstream Scale Workshop is hosted elsewhere (see hosting/).
 //
 // Deploy: `npm run build && npx wrangler deploy`
-// (or let Cloudflare Workers Builds run the same two commands on every push to `experimental`)
+// (or let Cloudflare Workers Builds run the same two commands on every push to `main`)
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "scale-workshop-experimental",
