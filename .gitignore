@@ -34,3 +34,6 @@ coverage
 .env.staging
 
 .eslintcache
+
+# Cloudflare Wrangler local state
+.wrangler

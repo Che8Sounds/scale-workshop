@@ -1,0 +1,26 @@
+// Cloudflare Workers deploy config for the experimental build at sw.omnitonality.com.
+// Fork-only file: upstream Scale Workshop is hosted elsewhere (see hosting/).
+//
+// Deploy: `npm run build && npx wrangler deploy`
+// (or let Cloudflare Workers Builds run the same two commands on every push to `experimental`)
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "scale-workshop-experimental",
+  "compatibility_date": "2026-11-25",
+
+  // Static assets only: the Vite build output, no Worker script
+  "assets": {
+    "directory": "./dist",
+    // Vue Router uses HTML5 history, so deep links like /scale/<id> or /lattice
+    // must fall back to index.html
+    "not_found_handling": "single-page-application"
+  },
+
+  // Wrangler creates the DNS record and certificate for this on deploy,
+  // as long as omnitonality.com is a zone in the same Cloudflare account
+  "routes": [{ "pattern": "sw.omnitonality.com", "custom_domain": true }],
+
+  // No *.workers.dev or preview URLs: the custom domain is the only address
+  "workers_dev": false,
+  "preview_urls": false
+}
