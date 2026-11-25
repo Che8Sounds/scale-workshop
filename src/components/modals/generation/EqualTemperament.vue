@@ -1,12 +1,23 @@
+<script lang="ts">
+import { ref } from 'vue'
+
+// Whether the step boxes are showing. Outlives the card body, so closing and reopening the card
+// (or switching cards) keeps the choice.
+const showSteps = ref(false)
+</script>
+
 <script setup lang="ts">
+import { computed } from 'vue'
 import { OCTAVE } from '@/constants'
 import Modal from '@/components/ModalDialog.vue'
-import ScaleLineInput from '@/components/ScaleLineInput.vue'
-import TextSlider from '@/components/TextSlider.vue'
+import TextSlider, { type Ratio } from '@/components/TextSlider.vue'
+import CardReadout from '@/components/rack/CardReadout.vue'
 import { MAX_EQUAL_TEMPERAMENT_SIZE, useModalStore } from '@/stores/modal'
 import { useScaleStore } from '@/stores/scale'
 import { vAutoGrow } from '@/directives/auto-grow'
 import { useGeneratorPreview, type GeneratorResult } from '@/composables/useGeneratorPreview'
+import { useCardAction } from '@/rack/card-actions'
+import { parseInterval } from '@/utils'
 
 defineProps<{
   show: boolean
@@ -30,11 +41,78 @@ const modal = useModalStore()
 
 // Double-click on the divisions slider resets to this.
 const DEFAULT_DIVISIONS = 12
+const OCTAVE_RATIO: Ratio = [2, 1]
+// The interval to divide, in cents. A typed ratio outside this is refused.
+const MIN_EQUAVE_CENTS = 1
+const MAX_EQUAVE_CENTS = 9600
+const MAX_RATIO_TERM = 9999
+
+useCardAction({
+  icon: 'steps',
+  label: 'Show relative steps and absolute degrees',
+  pressed: () => showSteps.value,
+  toggle: () => (showSteps.value = !showSteps.value)
+})
+
+// The two step boxes share one height, the taller content's, so they stay level.
+const stepsHeight = {}
 
 function setDivisions(value: number) {
   modal.divisions = value
   modal.updateFromDivisions()
 }
+
+// === Interval to divide: a pitch field (design/cards.md principle 3) ===
+
+/** The ratio the stored equave is spelled as, if it is a ratio the field keeps. */
+function ratioOfEquave(): Ratio | null {
+  if (modal.equave.domain !== 'linear') {
+    return null
+  }
+  try {
+    const fraction = modal.equave.value.toFraction()
+    const num = Number(fraction.n)
+    const den = Number(fraction.d)
+    if (fraction.s > 0 && num <= MAX_RATIO_TERM && den <= MAX_RATIO_TERM) {
+      return [num, den]
+    }
+  } catch {
+    // Not a ratio: shown as cents.
+  }
+  return null
+}
+
+const equaveCents = ref(modal.equave.totalCents())
+const equaveRatio = ref<Ratio | null>(ratioOfEquave())
+
+function setEquave(cents: number, ratio: Ratio | null) {
+  equaveCents.value = cents
+  equaveRatio.value = ratio
+  // A kept ratio is written as the ratio, cents as a SonicWeave cents literal (with a dot).
+  modal.equaveString = ratio ? `${ratio[0]}/${ratio[1]}` : cents.toFixed(3)
+  modal.equave = parseInterval(modal.equaveString)
+}
+
+// === Readout ===
+
+const stepCents = computed(() => equaveCents.value / modal.divisions)
+
+const degreeCents = computed(() => {
+  if (modal.singleStepOnly) {
+    return [stepCents.value]
+  }
+  return modal.degrees
+    .filter((steps) => !Number.isNaN(steps))
+    .map((steps) => steps * stepCents.value)
+})
+
+const stats = computed(() => [
+  { label: 'step', value: `${stepCents.value.toFixed(3)} ¢` },
+  { label: 'notes', value: String(degreeCents.value.length) },
+  { label: 'equave', value: `${equaveCents.value.toFixed(3)} ¢` }
+])
+
+// === Output ===
 
 /**
  * SonicWeave source and scale name for the card's current settings.
@@ -103,56 +181,68 @@ function generate(expand = true) {
       <h2>Generate equal temperament</h2>
     </template>
     <template #body>
-      <!-- Two columns: divisions | interval to divide, then relative steps | absolute degrees. -->
-      <div class="control-group et-grid">
-        <div class="control">
-          <label id="divisions-label">Number of divisions</label>
-          <TextSlider
-            id="divisions"
-            aria-labelledby="divisions-label"
-            :modelValue="modal.divisions"
-            :min="1"
-            :max="MAX_EQUAL_TEMPERAMENT_SIZE"
-            :defaultValue="DEFAULT_DIVISIONS"
-            :dragScale="0.3"
-            @update:modelValue="setDivisions"
-          />
+      <div class="card-stack">
+        <div class="card-grid">
+          <div class="card-field">
+            <label id="divisions-label">Divisions</label>
+            <TextSlider
+              aria-labelledby="divisions-label"
+              :modelValue="modal.divisions"
+              :min="1"
+              :max="MAX_EQUAL_TEMPERAMENT_SIZE"
+              :defaultValue="DEFAULT_DIVISIONS"
+              :dragScale="0.3"
+              @update:modelValue="setDivisions"
+            />
+          </div>
+          <div class="card-field">
+            <label id="equave-label">Interval to divide</label>
+            <TextSlider
+              aria-labelledby="equave-label"
+              pitch
+              :modelValue="equaveCents"
+              :ratio="equaveRatio"
+              :min="MIN_EQUAVE_CENTS"
+              :max="MAX_EQUAVE_CENTS"
+              :decimals="3"
+              :defaultRatio="OCTAVE_RATIO"
+              unit="¢"
+              @pitch="setEquave"
+            />
+          </div>
         </div>
-        <div class="control">
-          <label for="equave">Interval to divide</label>
-          <ScaleLineInput
-            id="equave"
-            class="equave-input"
-            @update:value="modal.equave = $event"
-            v-model="modal.equaveString"
-            :defaultValue="OCTAVE"
-          />
+        <div v-if="showSteps" class="card-grid">
+          <div class="card-field">
+            <label for="jumps" :class="{ disabled: modal.singleStepOnly }">Relative steps</label>
+            <textarea
+              id="jumps"
+              class="card-input"
+              v-model="modal.jumpsString"
+              v-auto-grow="stepsHeight"
+              :disabled="modal.singleStepOnly"
+              @input="modal.updateFromJumps"
+            ></textarea>
+          </div>
+          <div class="card-field">
+            <label for="degrees" :class="{ disabled: modal.singleStepOnly }">
+              Absolute degrees
+            </label>
+            <textarea
+              id="degrees"
+              class="card-input"
+              v-model="modal.degreesString"
+              v-auto-grow="stepsHeight"
+              :disabled="modal.singleStepOnly"
+              @input="modal.updateFromDegrees"
+            ></textarea>
+          </div>
         </div>
-        <div class="control">
-          <label for="jumps" :class="{ disabled: modal.singleStepOnly }">Relative steps</label>
-          <textarea
-            id="jumps"
-            v-auto-grow
-            v-model="modal.jumpsString"
-            :disabled="modal.singleStepOnly"
-            @input="modal.updateFromJumps"
-          ></textarea>
-        </div>
-        <div class="control">
-          <label for="degrees" :class="{ disabled: modal.singleStepOnly }">Absolute degrees</label>
-          <textarea
-            id="degrees"
-            v-auto-grow
-            v-model="modal.degreesString"
-            :disabled="modal.singleStepOnly"
-            @input="modal.updateFromDegrees"
-          ></textarea>
-        </div>
-      </div>
-      <div class="warning">
-        <p v-if="modal.singleStepOnly">Warning: Scale will be converted to a single step.</p>
-        <p v-else-if="modal.divisions !== modal.safeScaleSize">
-          Warning: Scale will be capped at {{ MAX_EQUAL_TEMPERAMENT_SIZE }} notes.
+        <CardReadout :cents="degreeCents" :stats="stats" />
+        <p v-if="modal.singleStepOnly" class="warning">
+          Fractional divisions make a single step, not a scale.
+        </p>
+        <p v-else-if="modal.divisions !== modal.safeScaleSize" class="warning">
+          The scale is capped at {{ MAX_EQUAL_TEMPERAMENT_SIZE }} notes.
         </p>
       </div>
     </template>
@@ -165,27 +255,3 @@ function generate(expand = true) {
     </template>
   </Modal>
 </template>
-
-<style scoped>
-.et-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0.75rem;
-}
-/* Fields in a row line up even if one label wraps. */
-.et-grid > .control {
-  align-content: end;
-}
-/* One line tall like the fields above; v-auto-grow adds lines as needed, then it scrolls. */
-.et-grid textarea {
-  width: 100%;
-  min-height: 2.25rem;
-  max-height: 10rem;
-  resize: none;
-}
-/* Match the divisions slider's height so the first row lines up. */
-.equave-input {
-  height: 2.25rem;
-  min-width: 0;
-}
-</style>

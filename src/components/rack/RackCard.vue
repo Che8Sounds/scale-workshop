@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useId } from 'vue'
+import { provide, useId } from 'vue'
+import { CARD_ACTION_ICONS, CARD_ACTIONS, createCardActions } from '@/rack/card-actions'
 
 /**
  * One module in the Build Scale rack. The header toggles the card open or closed (the rack keeps
@@ -30,6 +31,10 @@ withDefaults(
 const emit = defineEmits(['toggle', 'remove', 'bypass', 'move', 'dragstart'])
 
 const bodyId = useId()
+
+// Header toggles the card's contents register (`useCardAction`), shown while the card is open.
+const actions = createCardActions()
+provide(CARD_ACTIONS, actions)
 
 function onHandleKeydown(event: KeyboardEvent) {
   if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
@@ -64,7 +69,9 @@ function onHandleKeydown(event: KeyboardEvent) {
         :disabled="!expandable"
         @click="$emit('toggle')"
       >
-        <span v-if="expandable !== false" class="chevron" aria-hidden="true">▾</span>
+        <span v-if="expandable !== false" class="icon-box chevron" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+        </span>
         <span class="titles">
           <span class="title">{{ title }}</span>
           <span v-if="summary" class="summary">{{ summary }}</span>
@@ -80,7 +87,24 @@ function onHandleKeydown(event: KeyboardEvent) {
       >
         <span class="led" aria-hidden="true"></span>
       </button>
-      <button class="rack-card-remove" :aria-label="removeLabel" @click="$emit('remove')">×</button>
+      <button
+        v-for="action of open ? actions : []"
+        :key="action.icon"
+        class="rack-card-action"
+        :aria-pressed="action.pressed()"
+        :aria-label="action.label"
+        :title="action.label"
+        @click="action.toggle()"
+      >
+        <span class="icon-box" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path :d="CARD_ACTION_ICONS[action.icon]" /></svg>
+        </span>
+      </button>
+      <button class="rack-card-remove" :aria-label="removeLabel" @click="$emit('remove')">
+        <span class="icon-box" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12 M18 6L6 18" /></svg>
+        </span>
+      </button>
     </header>
     <p v-if="error" class="rack-card-status error" role="status">{{ error }}</p>
     <p v-else-if="stale && !open" class="rack-card-status" role="status">
@@ -93,7 +117,16 @@ function onHandleKeydown(event: KeyboardEvent) {
 </template>
 
 <style scoped>
+/*
+ * Card layout tokens (design/cards.md). One inset on all four sides of the body (principle 1);
+ * the header's icons sit on the same inset lines, their 32px hit areas overhanging into it.
+ */
 .rack-card {
+  --card-inset: 16px;
+  --card-gap: 12px;
+  --control-h: 2.25rem;
+  --icon-size: 20px;
+  --icon-box: 32px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background-color: var(--color-background);
@@ -106,7 +139,9 @@ function onHandleKeydown(event: KeyboardEvent) {
 }
 .rack-card-header {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 2px;
+  padding: 6px calc(var(--card-inset) - (var(--icon-box) - var(--icon-size)) / 2);
 }
 .rack-card.open .rack-card-header {
   border-bottom: 1px solid var(--color-border);
@@ -116,9 +151,29 @@ function onHandleKeydown(event: KeyboardEvent) {
   background: none;
   color: inherit;
   cursor: pointer;
+  padding: 0;
+}
+.icon-box {
+  flex: none;
+  width: var(--icon-box);
+  height: var(--icon-box);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.icon-box svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .rack-card-handle {
-  padding: 0 0.25rem 0 0.5rem;
+  width: var(--icon-box);
+  align-self: stretch;
   cursor: grab;
   opacity: 0.6;
   touch-action: none;
@@ -131,28 +186,29 @@ function onHandleKeydown(event: KeyboardEvent) {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  gap: 6px;
   text-align: left;
 }
 .rack-card-toggle:disabled {
   cursor: default;
 }
-.modifier .rack-card-toggle {
-  padding-left: 0.25rem;
-}
 .chevron {
-  display: inline-block;
   transition: transform 0.15s ease;
   transform: rotate(-90deg);
 }
 .open .chevron {
   transform: none;
 }
+.rack-card-toggle:hover .chevron,
+.rack-card-action:hover .icon-box,
+.rack-card-remove:hover .icon-box {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
 .titles {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  line-height: 1.3;
 }
 .title {
   font-weight: bold;
@@ -165,9 +221,11 @@ function onHandleKeydown(event: KeyboardEvent) {
   white-space: nowrap;
 }
 .rack-card-bypass {
-  padding: 0 0.5rem;
+  width: var(--icon-box);
+  align-self: stretch;
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 .led {
   width: 0.6rem;
@@ -182,11 +240,16 @@ function onHandleKeydown(event: KeyboardEvent) {
   border: 1px solid currentColor;
   opacity: 0.6;
 }
+.rack-card-action,
 .rack-card-remove {
-  padding: 0 0.75rem;
-  font-size: 1.2rem;
   opacity: 0.6;
 }
+.rack-card-action[aria-pressed='true'] {
+  opacity: 1;
+  color: var(--color-accent-text-btn);
+}
+.rack-card-action:hover,
+.rack-card-action:focus-visible,
 .rack-card-remove:hover,
 .rack-card-remove:focus-visible,
 .rack-card-handle:hover,
@@ -195,7 +258,7 @@ function onHandleKeydown(event: KeyboardEvent) {
 }
 .rack-card-status {
   margin: 0;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--card-inset);
   font-size: 0.85em;
   opacity: 0.8;
 }
@@ -204,6 +267,13 @@ function onHandleKeydown(event: KeyboardEvent) {
   opacity: 1;
 }
 .rack-card-body {
-  padding: 0.75rem;
+  padding: var(--card-inset);
+}
+/* Nothing but the inset at the body's edges, whatever margins the contents bring (principle 1). */
+.rack-card-body :deep(.modal-embedded > :first-child) {
+  margin-top: 0;
+}
+.rack-card-body :deep(.modal-embedded > :last-child) {
+  margin-bottom: 0;
 }
 </style>

@@ -678,6 +678,7 @@ function panic() {
 <style>
 @import '@/assets/base.css';
 @import '@/assets/main.css';
+@import '@/assets/card.css';
 
 #app {
   display: flex;

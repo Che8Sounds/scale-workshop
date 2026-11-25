@@ -1,0 +1,64 @@
+/*
+ * Shared building blocks for rack card contents (design/cards.md). Sizes come from the tokens a
+ * `.rack-card` defines; the fallbacks keep a block usable outside one.
+ */
+
+/* Controls side by side, two to a row. */
+.card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--card-gap, 12px);
+}
+
+/* Rows of a card body, one under another. */
+.card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap, 12px);
+}
+
+/* A label centered over its control (cards.md: labels). */
+.card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.card-field > label,
+.card-field > .card-label {
+  font-weight: bold;
+  line-height: 1.3;
+  text-align: center;
+}
+.card-field > label.disabled {
+  color: var(--color-text-mute);
+}
+
+/*
+ * Text boxes share the TextSlider's skin, and their text is centered both ways (principle 2):
+ * the vertical padding centers one line in the control height, and v-auto-grow adds lines below.
+ */
+.card-input {
+  --line: 1.25rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--control-h, 2.25rem);
+  max-height: 10rem;
+  padding: calc((var(--control-h, 2.25rem) - var(--line) - 2px) / 2) 0.6rem;
+  border-radius: 6px;
+  background-color: rgba(142, 142, 147, 0.15);
+  border: 1px solid color-mix(in srgb, var(--color-accent-text-btn) 48%, transparent);
+  color: var(--color-text);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: var(--line);
+  text-align: center;
+  resize: none;
+  outline: none;
+}
+.card-input:focus {
+  border-color: color-mix(in srgb, var(--color-accent-text-btn) 96%, transparent);
+}
+.card-input:disabled {
+  opacity: 0.4;
+}

@@ -185,3 +185,116 @@ describe('TextSlider', () => {
     expect(el.tabIndex).toBe(-1)
   })
 })
+
+describe('TextSlider pitch field', () => {
+  function mountPitch(props: Record<string, unknown> = {}) {
+    return mountSlider({
+      modelValue: 1200,
+      min: 1,
+      max: 9600,
+      decimals: 3,
+      unit: '¢',
+      pitch: true,
+      ratio: [2, 1],
+      defaultRatio: [2, 1],
+      defaultValue: undefined,
+      'onUpdate:ratio': (ratio: unknown) => wrapper.setProps({ ratio }),
+      ...props
+    })
+  }
+
+  function pitches() {
+    return (wrapper.emitted('pitch') ?? []) as [number, unknown][]
+  }
+
+  function lastPitch() {
+    const all = pitches()
+    return all[all.length - 1]
+  }
+
+  async function type(el: HTMLElement, text: string) {
+    for (const char of text) {
+      key(el, char)
+    }
+    key(el, 'Enter')
+    await nextTick()
+  }
+
+  it('shows a kept ratio without a unit', () => {
+    const el = mountPitch()
+    expect(el.textContent?.trim()).toBe('2/1')
+  })
+
+  it('shows the ratio as cents while hovered', async () => {
+    const el = mountPitch()
+    el.dispatchEvent(new PointerEvent('pointerenter'))
+    await nextTick()
+    expect(el.textContent?.replace(/\s+/g, '')).toBe('1200.000¢')
+    el.dispatchEvent(new PointerEvent('pointerleave'))
+    await nextTick()
+    expect(el.textContent?.trim()).toBe('2/1')
+  })
+
+  it('keeps a typed whole-number ratio, reduced', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '6/4')
+    const [cents, ratio] = lastPitch()!
+    expect(cents).toBeCloseTo(701.955, 3)
+    expect(ratio).toEqual([3, 2])
+    expect(el.textContent?.trim()).toBe('3/2')
+  })
+
+  it('applies a non-whole ratio as cents', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '3.5/2')
+    const [cents, ratio] = lastPitch()!
+    expect(cents).toBeCloseTo(1200 * Math.log2(1.75), 6)
+    expect(ratio).toBeNull()
+  })
+
+  it('reads a bare number as cents', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '702')
+    expect(lastPitch()).toEqual([702, null])
+  })
+
+  it('refuses a ratio outside the range instead of clamping it', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '1000/1')
+    expect(pitches()).toEqual([])
+    expect(el.textContent?.trim()).toBe('2/1')
+  })
+
+  it('drops the ratio on a drag and moves dragScale cents per pixel', async () => {
+    const el = mountPitch()
+    el.dispatchEvent(pointer('pointerdown', 100))
+    el.dispatchEvent(pointer('pointermove', 90))
+    el.dispatchEvent(pointer('pointerup', 90))
+    expect(lastPitch()).toEqual([1210, null])
+  })
+
+  it('nudges 1 cent per arrow, 10 with Cmd, 0.1 with Shift', async () => {
+    const el = mountPitch({ ratio: null })
+    el.focus()
+    key(el, 'ArrowUp')
+    await nextTick()
+    expect(lastPitch()).toEqual([1201, null])
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', metaKey: true, bubbles: true }))
+    await nextTick()
+    expect(lastPitch()).toEqual([1211, null])
+    key(el, 'ArrowDown', true)
+    await nextTick()
+    expect(lastPitch()![0]).toBeCloseTo(1210.9, 6)
+  })
+
+  it('resets to the default ratio on double-click', async () => {
+    const el = mountPitch({ modelValue: 700, ratio: null })
+    el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    await nextTick()
+    expect(lastPitch()).toEqual([1200, [2, 1]])
+  })
+})

@@ -11,10 +11,24 @@
  * Interactive changes are clamped to [min, max]. Drags snap to the `step` grid, while a typed
  * value is kept as typed (only clamped), so e.g. fractional divisions stay possible.
  *
- * Not ported: Performer's pitch/ratio features (`acceptsRatio`, `keepsRatio`, pitch modifiers),
- * label caption (use a regular <label> with `aria-labelledby`) and its carved/card paints.
+ * With `pitch` it is a pitch field (Performer's `keepsRatio`, design/cards.md principle 3): the
+ * value is in cents and the field also takes a typed ratio.
+ * - A token with '/' is a ratio, anything else is cents. A ratio with whole terms up to 9999 is
+ *   kept, reduced, and shown as typed (no unit); any other ratio applies but shows as cents. A
+ *   ratio outside [min, max] is refused rather than clamped.
+ * - Hovering a field that shows a ratio shows its cents instead, at 85% of the ink.
+ * - Anything that moves the value (drag, nudge, reset to a cents default) drops the ratio.
+ * - Double-click resets to `defaultRatio` when one is given.
+ * - Modifiers: Shift 0.1x, Cmd (Ctrl off the Mac) 10x, Cmd wins. The drag moves `dragScale`
+ *   cents per pixel and an arrow press moves 1 cent, both times the modifier.
+ * Every interactive change also emits `pitch` with the cents and the kept ratio (or null).
+ *
+ * Not ported: Performer's label caption (use a regular <label> with `aria-labelledby`) and its
+ * carved/card paints.
  */
 import { computed, ref } from 'vue'
+
+export type Ratio = [number, number]
 
 const props = withDefaults(
   defineProps<{
@@ -27,6 +41,12 @@ const props = withDefaults(
     defaultValue?: number
     unit?: string
     disabled?: boolean
+    /** A pitch field: the value is cents and a ratio can be typed and kept. */
+    pitch?: boolean
+    /** The ratio a pitch field's value was typed as, if it is kept. */
+    ratio?: Ratio | null
+    /** What a pitch field's double-click resets to, when its default is a ratio. */
+    defaultRatio?: Ratio
   }>(),
   {
     step: 1,
@@ -34,24 +54,35 @@ const props = withDefaults(
     dragScale: 1,
     defaultValue: undefined,
     unit: '',
-    disabled: false
+    disabled: false,
+    pitch: false,
+    ratio: null,
+    defaultRatio: undefined
   }
 )
 
 const emit = defineEmits<{
   'update:modelValue': [value: number]
+  'update:ratio': [ratio: Ratio | null]
+  pitch: [cents: number, ratio: Ratio | null]
 }>()
 
 // Pointer travel (px) before a press becomes a drag: DragGesture(minimumDistance: 2).
 const DRAG_THRESHOLD = 2
 const FINE_MULTIPLIER = 0.1
 const COARSE_KEY_MULTIPLIER = 10
+// Pitch fields: Cmd is this much faster, and one arrow press moves this many cents.
+const PITCH_FAST_MULTIPLIER = 10
+const PITCH_KEY_STEP = 1
+// A kept ratio's largest term.
+const MAX_RATIO_TERM = 9999
 const NUMBER_PATTERN = /^[+-]?(\d+\.?\d*|\.\d+)$/
 
 const root = ref<HTMLDivElement | null>(null)
 const isEditing = ref(false)
 const editText = ref('')
 const isDragging = ref(false)
+const isHovered = ref(false)
 
 let pointerId: number | null = null
 let downX = 0
@@ -60,9 +91,25 @@ let lastDy = 0
 // Unrounded running value so sub-step pixel movement accumulates across frames.
 let accumulator = 0
 
-const displayText = computed(() =>
+const showsRatio = computed(() => props.pitch && !!props.ratio)
+
+/** While the pointer is over a field showing a ratio, it shows the ratio's cents instead. */
+const swapsToCents = computed(
+  () =>
+    showsRatio.value && isHovered.value && !isEditing.value && !isDragging.value && !props.disabled
+)
+
+const numberText = computed(() =>
   props.decimals > 0 ? props.modelValue.toFixed(props.decimals) : String(props.modelValue)
 )
+
+const displayText = computed(() =>
+  showsRatio.value && !swapsToCents.value
+    ? `${props.ratio![0]}/${props.ratio![1]}`
+    : numberText.value
+)
+
+const showsUnit = computed(() => !!props.unit && (!showsRatio.value || swapsToCents.value))
 
 function clamp(value: number) {
   return Math.min(props.max, Math.max(props.min, value))
@@ -81,14 +128,68 @@ function snapToStep(value: number) {
   return clamp(Number(snapped.toFixed(digits)))
 }
 
-function setValueInteractive(value: number) {
+function sameRatio(a: Ratio | null | undefined, b: Ratio | null | undefined) {
+  return (a ?? null) === (b ?? null) || (!!a && !!b && a[0] === b[0] && a[1] === b[1])
+}
+
+/** Clamps and emits. A pitch field keeps `ratio` (null unless a ratio was just typed). */
+function setValueInteractive(value: number, ratio: Ratio | null = null) {
   if (Number.isNaN(value)) {
     return
   }
   const clamped = clamp(value)
+  const keptRatio = props.pitch ? ratio : null
+  if (clamped === props.modelValue && sameRatio(keptRatio, props.pitch ? props.ratio : null)) {
+    return
+  }
   if (clamped !== props.modelValue) {
     emit('update:modelValue', clamped)
   }
+  if (props.pitch) {
+    if (!sameRatio(keptRatio, props.ratio)) {
+      emit('update:ratio', keptRatio)
+    }
+    emit('pitch', clamped, keptRatio)
+  }
+}
+
+/** The modifier multiplier: Shift finer, and on a pitch field Cmd/Ctrl faster (Cmd wins). */
+function multiplier(event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) {
+  if (props.pitch && (event.metaKey || event.ctrlKey)) {
+    return PITCH_FAST_MULTIPLIER
+  }
+  return event.shiftKey ? FINE_MULTIPLIER : 1
+}
+
+function gcd(a: number, b: number): number {
+  return b ? gcd(b, a % b) : a
+}
+
+/** `n/d` as cents and the ratio to keep (null if it can't be kept), or undefined if not a ratio. */
+function parseRatio(text: string): { cents: number; kept: Ratio | null } | undefined {
+  const slash = text.indexOf('/')
+  if (slash < 0) {
+    return undefined
+  }
+  const numText = text.slice(0, slash).trim()
+  const denText = text.slice(slash + 1).trim()
+  if (!NUMBER_PATTERN.test(numText) || !NUMBER_PATTERN.test(denText)) {
+    return undefined
+  }
+  const num = parseFloat(numText)
+  const den = parseFloat(denText)
+  if (!(num > 0 && den > 0)) {
+    return undefined
+  }
+  const cents = 1200 * Math.log2(num / den)
+  let kept: Ratio | null = null
+  if (Number.isInteger(num) && Number.isInteger(den)) {
+    const divisor = gcd(num, den)
+    if (num / divisor <= MAX_RATIO_TERM && den / divisor <= MAX_RATIO_TERM) {
+      kept = [num / divisor, den / divisor]
+    }
+  }
+  return { cents, kept }
 }
 
 // --- Pointer ---
@@ -132,13 +233,14 @@ function onPointermove(event: PointerEvent) {
     accumulator = props.modelValue
     lastDy = 0
   }
-  const perPixel = props.step * props.dragScale * (event.shiftKey ? FINE_MULTIPLIER : 1)
+  // A pitch field moves `dragScale` cents per pixel; others `step * dragScale`.
+  const perPixel = (props.pitch ? 1 : props.step) * props.dragScale * multiplier(event)
   accumulator = clamp(accumulator - (dy - lastDy) * perPixel)
   lastDy = dy
-  const snapped = snapToStep(accumulator)
-  if (snapped !== props.modelValue) {
-    emit('update:modelValue', snapped)
-  }
+  const next = props.pitch
+    ? clamp(Number(accumulator.toFixed(props.decimals)))
+    : snapToStep(accumulator)
+  setValueInteractive(next)
 }
 
 function onPointerup(event: PointerEvent) {
@@ -153,10 +255,15 @@ function onPointerup(event: PointerEvent) {
 }
 
 function onDoubleClick() {
-  if (props.disabled || props.defaultValue === undefined) {
+  if (props.disabled) {
     return
   }
-  setValueInteractive(props.defaultValue)
+  if (props.pitch && props.defaultRatio) {
+    const [num, den] = props.defaultRatio
+    setValueInteractive(1200 * Math.log2(num / den), [num, den])
+  } else if (props.defaultValue !== undefined) {
+    setValueInteractive(props.defaultValue)
+  }
 }
 
 // --- Keyboard ---
@@ -171,13 +278,22 @@ function onKeydown(event: KeyboardEvent) {
     event.stopPropagation()
     return
   }
-  if (event.ctrlKey || event.metaKey || event.altKey) {
+  const isArrow = event.key === 'ArrowUp' || event.key === 'ArrowDown'
+  // A pitch field's arrows take Cmd/Ctrl as "faster"; other shortcuts pass through.
+  if (
+    (event.ctrlKey || event.metaKey || event.altKey) &&
+    !(props.pitch && isArrow && !event.altKey)
+  ) {
     return
   }
   let handled = true
-  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+  if (isArrow) {
     if (!isEditing.value) {
-      const delta = event.shiftKey ? props.step * COARSE_KEY_MULTIPLIER : props.step
+      const delta = props.pitch
+        ? PITCH_KEY_STEP * multiplier(event)
+        : event.shiftKey
+          ? props.step * COARSE_KEY_MULTIPLIER
+          : props.step
       setValueInteractive(props.modelValue + (event.key === 'ArrowUp' ? delta : -delta))
     }
   } else if (event.key === 'Enter') {
@@ -194,7 +310,7 @@ function onKeydown(event: KeyboardEvent) {
     if (isEditing.value) {
       editText.value = editText.value.slice(0, -1)
     }
-  } else if (/^[0-9.-]$/.test(event.key)) {
+  } else if (/^[0-9.-]$/.test(event.key) || (props.pitch && event.key === '/')) {
     if (isEditing.value) {
       editText.value += event.key
     } else {
@@ -217,7 +333,13 @@ function commitEdit() {
   }
   const typed = editText.value.trim()
   // A failed parse keeps the old value.
-  if (NUMBER_PATTERN.test(typed)) {
+  const ratio = props.pitch ? parseRatio(typed) : undefined
+  if (ratio) {
+    // Refused, not clamped, outside the range: the ratio typed is not the one a clamp keeps.
+    if (ratio.cents >= props.min && ratio.cents <= props.max) {
+      setValueInteractive(ratio.cents, ratio.kept)
+    }
+  } else if (NUMBER_PATTERN.test(typed)) {
     setValueInteractive(parseFloat(typed))
   }
   cancelEdit()
@@ -241,15 +363,21 @@ defineExpose({ focus: () => root.value?.focus() })
     :aria-valuemin="min"
     :aria-valuemax="max"
     :aria-valuenow="modelValue"
-    :aria-valuetext="unit ? `${displayText} ${unit}` : displayText"
+    :aria-valuetext="showsUnit ? `${displayText} ${unit}` : displayText"
     :aria-disabled="disabled || undefined"
     :data-editing="isEditing || undefined"
-    title="Drag up or down, double-click to reset, or type a number"
+    :title="
+      pitch
+        ? 'Drag up or down, double-click to reset, or type cents or a ratio'
+        : 'Drag up or down, double-click to reset, or type a number'
+    "
     @pointerdown="onPointerdown"
     @mousedown="onMousedown"
     @pointermove="onPointermove"
     @pointerup="onPointerup"
     @pointercancel="onPointerup"
+    @pointerenter="isHovered = true"
+    @pointerleave="isHovered = false"
     @dblclick="onDoubleClick"
     @keydown="onKeydown"
     @blur="commitEdit"
@@ -259,8 +387,8 @@ defineExpose({ focus: () => root.value?.focus() })
       ><span class="caret" aria-hidden="true"></span>
     </template>
     <template v-else>
-      <span class="value">{{ displayText }}</span>
-      <span v-if="unit" class="unit">{{ unit }}</span>
+      <span class="value" :class="{ swapped: swapsToCents }">{{ displayText }}</span>
+      <span v-if="showsUnit" class="unit">{{ unit }}</span>
     </template>
   </div>
 </template>
@@ -276,9 +404,9 @@ defineExpose({ focus: () => root.value?.focus() })
   height: 2.25rem;
   padding: 0 0.5rem;
   border-radius: 6px;
-  /* Performer: systemGray at 15% fill, accent at 60% x 35% (unfocused) / 80% (focused) edge. */
+  /* Performer: systemGray at 15% fill. Accent edge at 48% unfocused, 96% focused (cards.md 4). */
   background-color: rgba(142, 142, 147, 0.15);
-  border: 1px solid color-mix(in srgb, var(--color-accent-text-btn) 21%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent-text-btn) 48%, transparent);
   color: var(--color-accent-text-btn);
   cursor: ns-resize;
   -webkit-user-select: none;
@@ -289,7 +417,7 @@ defineExpose({ focus: () => root.value?.focus() })
 .text-slider:focus-visible,
 .text-slider:focus,
 .text-slider.dragging {
-  border-color: color-mix(in srgb, var(--color-accent-text-btn) 48%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent-text-btn) 96%, transparent);
 }
 /* Never paint a selection highlight, even when a selection started elsewhere covers the box. */
 .text-slider::selection,
@@ -308,6 +436,10 @@ defineExpose({ focus: () => root.value?.focus() })
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+}
+/* A kept ratio's cents while hovered: 85% of the ink. */
+.value.swapped {
+  color: color-mix(in srgb, var(--color-accent-text-btn) 85%, transparent);
 }
 .unit {
   font-size: 0.7rem;
