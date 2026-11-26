@@ -68,7 +68,8 @@ const thin = computed(() => ticks.value.length > 100)
 .card-readout {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  /* The card gap between ruler and stats, so the stats read as their own line, not a caption. */
+  gap: var(--card-gap, 12px);
   /* On top of the card gap: the readout shows results, so it sits apart from the controls. */
   margin-top: 8px;
 }

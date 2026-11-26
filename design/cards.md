@@ -114,6 +114,8 @@ Not decided yet.
 
 - **Readout strip.** The ruler plus stats (step size, note count, equave in cents) under the
   controls, 8px further from them than the card gap (20px in all), since it shows results rather
-  than settings. Built on ET to try it; every generator could reuse it.
+  than settings. The stats sit one card gap (12px) below the ruler, so they read as their own
+  line rather than a caption glued to it (6px was tried and felt glued). Built on ET to try it;
+  every generator could reuse it.
 - **Typing a bare number in a pitch field.** Performer reads `3` as 3 cents (built that way now).
   SonicWeave reads `3` as 3/1 and needs `3.` or `3c` for cents.
