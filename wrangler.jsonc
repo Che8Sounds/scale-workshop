@@ -20,7 +20,7 @@
   // as long as omnitonality.com is a zone in the same Cloudflare account
   "routes": [{ "pattern": "sw.omnitonality.com", "custom_domain": true }],
 
-  // No *.workers.dev or preview URLs: the custom domain is the only address
+  // No *.workers.dev or preview URLs: sw.omnitonality.com is the only address
   "workers_dev": false,
   "preview_urls": false
 }
