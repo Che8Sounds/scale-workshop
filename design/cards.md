@@ -41,14 +41,18 @@ padding (`.card-input` does this for text boxes).
 ### 3. Pitch values are pitch fields
 
 Any field that holds a pitch (interval to divide, equave, period, generator) is a TextSlider pitch
-field, exactly like Performer's `OCTextSlider` with `keepsRatio`:
+field, like Performer's `OCTextSlider` with `keepsRatio`, except that typing and display follow the site:
 
-- **Typing** takes either spelling. A token with `/` is a ratio, anything else is cents
-  (`702` means 702 cents, not 702/1).
-- **A typed ratio is kept** and shown as typed (`3/2`, no unit) when both terms are whole numbers
-  up to 9999. It is reduced (`6/4` shows `3/2`). Any other ratio (`3.5/2`) applies but shows as cents.
+- **Typing follows the site's Scala convention** (SonicWeave reads it, as in the scale data), so
+  users keep the habits they have: a number with a point is cents (`702.`, `701.955`), a number
+  without one is a ratio (`3` is 3/1, `3/2`). Other SonicWeave pitches work too (`7\12`, `3c`).
+  Performer's rule (a bare `702` is cents) is deliberately not used on the site.
+- **A typed ratio is kept** and shown as a ratio (`3/2`) when both terms are whole numbers up to
+  9999. It is reduced (`6/4` shows `3/2`). Anything else applies but shows as cents.
 - **A ratio outside the field's range is refused**, not clamped, since a clamped ratio is not the
-  ratio that was typed.
+  ratio that was typed. Typed cents are clamped.
+- **Cents show the Scala way**: always with a point and no unit (`1200.000`, or `1200.` with no
+  decimals), so whatever a field shows can be typed back and means the same. Readouts follow suit.
 - **Hovering** a field that shows a ratio shows its cents instead, at 85% of the ink, previewing
   what a drag would leave. The box never resizes for the hover.
 - **Anything that moves the value drops the ratio** (drag, arrow nudge, reset to a cents default),
@@ -58,9 +62,6 @@ field, exactly like Performer's `OCTextSlider` with `keepsRatio`:
   both are held. Same factors for drag and arrow keys. One arrow press is 1 cent.
 - **Output to SonicWeave**: a kept ratio is written as the ratio (`3/2`), cents as a cents
   literal with a decimal point (`701.955`).
-
-Open question (see Proposed): in SonicWeave a bare `3` means 3/1 (the tritave). Under the
-Performer rule it means 3 cents, so a tritave is typed `3/1`.
 
 ### 4. TextSlider edge brightness
 
@@ -117,5 +118,3 @@ Not decided yet.
   than settings. The stats sit one card gap (12px) below the ruler, so they read as their own
   line rather than a caption glued to it (6px was tried and felt glued). Built on ET to try it;
   every generator could reuse it.
-- **Typing a bare number in a pitch field.** Performer reads `3` as 3 cents (built that way now).
-  SonicWeave reads `3` as 3/1 and needs `3.` or `3c` for cents.

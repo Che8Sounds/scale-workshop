@@ -17,7 +17,7 @@ import { useScaleStore } from '@/stores/scale'
 import { vAutoGrow } from '@/directives/auto-grow'
 import { useGeneratorPreview, type GeneratorResult } from '@/composables/useGeneratorPreview'
 import { useCardAction } from '@/rack/card-actions'
-import { parseInterval } from '@/utils'
+import { centString, parseInterval, smallRatio } from '@/utils'
 
 defineProps<{
   show: boolean
@@ -46,6 +46,8 @@ const OCTAVE_RATIO: Ratio = [2, 1]
 const MIN_EQUAVE_CENTS = 1
 const MAX_EQUAVE_CENTS = 9600
 const MAX_RATIO_TERM = 9999
+// The equave field shows and stores cents to this many decimals.
+const EQUAVE_DECIMALS = 3
 
 useCardAction({
   icon: 'steps',
@@ -64,32 +66,14 @@ function setDivisions(value: number) {
 
 // === Interval to divide: a pitch field (design/cards.md principle 3) ===
 
-/** The ratio the stored equave is spelled as, if it is a ratio the field keeps. */
-function ratioOfEquave(): Ratio | null {
-  if (modal.equave.domain !== 'linear') {
-    return null
-  }
-  try {
-    const fraction = modal.equave.value.toFraction()
-    const num = Number(fraction.n)
-    const den = Number(fraction.d)
-    if (fraction.s > 0 && num <= MAX_RATIO_TERM && den <= MAX_RATIO_TERM) {
-      return [num, den]
-    }
-  } catch {
-    // Not a ratio: shown as cents.
-  }
-  return null
-}
-
 const equaveCents = ref(modal.equave.totalCents())
-const equaveRatio = ref<Ratio | null>(ratioOfEquave())
+const equaveRatio = ref<Ratio | null>(smallRatio(modal.equave, MAX_RATIO_TERM))
 
 function setEquave(cents: number, ratio: Ratio | null) {
   equaveCents.value = cents
   equaveRatio.value = ratio
-  // A kept ratio is written as the ratio, cents as a SonicWeave cents literal (with a dot).
-  modal.equaveString = ratio ? `${ratio[0]}/${ratio[1]}` : cents.toFixed(3)
+  // Scala style, like the rest of the site: a kept ratio as the ratio, cents with a point.
+  modal.equaveString = ratio ? `${ratio[0]}/${ratio[1]}` : centString(cents, EQUAVE_DECIMALS)
   modal.equave = parseInterval(modal.equaveString)
 }
 
@@ -107,9 +91,9 @@ const degreeCents = computed(() => {
 })
 
 const stats = computed(() => [
-  { label: 'step', value: `${stepCents.value.toFixed(3)} ¢` },
+  { label: 'step', value: centString(stepCents.value, scale.centsFractionDigits) },
   { label: 'notes', value: String(degreeCents.value.length) },
-  { label: 'equave', value: `${equaveCents.value.toFixed(3)} ¢` }
+  { label: 'equave', value: centString(equaveCents.value, scale.centsFractionDigits) }
 ])
 
 // === Output ===
@@ -204,9 +188,8 @@ function generate(expand = true) {
               :ratio="equaveRatio"
               :min="MIN_EQUAVE_CENTS"
               :max="MAX_EQUAVE_CENTS"
-              :decimals="3"
+              :decimals="EQUAVE_DECIMALS"
               :defaultRatio="OCTAVE_RATIO"
-              unit="¢"
               @pitch="setEquave"
             />
           </div>

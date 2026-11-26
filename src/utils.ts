@@ -47,6 +47,28 @@ export function parseInterval(input: string) {
 }
 
 /**
+ * The interval as a positive ratio `[numerator, denominator]` with both terms at most `maxTerm`,
+ * or `null` if it isn't one (cents, an irrational step, a huge fraction).
+ * Only intervals spelled as ratios count (linear domain): `702.` is cents even if it were exact.
+ */
+export function smallRatio(interval: Interval, maxTerm = 9999): [number, number] | null {
+  if (interval.domain !== 'linear') {
+    return null
+  }
+  try {
+    const fraction = interval.value.toFraction()
+    const num = Number(fraction.n)
+    const den = Number(fraction.d)
+    if (fraction.s > 0 && num <= maxTerm && den <= maxTerm) {
+      return [num, den]
+    }
+  } catch {
+    // Not a fraction.
+  }
+  return null
+}
+
+/**
  * Parses a val expression with a tolerant fallback strategy.
  *
  * If direct parsing fails, this helper retries with an `@` suffix. If both fail,

@@ -13,9 +13,13 @@
  *
  * With `pitch` it is a pitch field (Performer's `keepsRatio`, design/cards.md principle 3): the
  * value is in cents and the field also takes a typed ratio.
- * - A token with '/' is a ratio, anything else is cents. A ratio with whole terms up to 9999 is
- *   kept, reduced, and shown as typed (no unit); any other ratio applies but shows as cents. A
- *   ratio outside [min, max] is refused rather than clamped.
+ * - Typing follows the site's Scala convention, read by SonicWeave: a number with a point is
+ *   cents (`702.`, `701.955`), one without is a ratio (`3` is 3/1, `3/2`), and the rest of
+ *   SonicWeave works too (`7\12`, `3c`). A ratio with whole terms up to 9999 is kept, reduced, and
+ *   shown as a ratio; anything else applies and shows as cents. A typed ratio outside [min, max]
+ *   is refused rather than clamped; typed cents are clamped.
+ * - Cents always show with a point (`1200.000`, or `1200.` with no decimals), so what the field
+ *   shows can be typed back. Pitch fields take no unit.
  * - Hovering a field that shows a ratio shows its cents instead, at 85% of the ink.
  * - Anything that moves the value (drag, nudge, reset to a cents default) drops the ratio.
  * - Double-click resets to `defaultRatio` when one is given.
@@ -27,6 +31,7 @@
  * carved/card paints.
  */
 import { computed, ref } from 'vue'
+import { centString, parseInterval, smallRatio } from '@/utils'
 
 export type Ratio = [number, number]
 
@@ -100,7 +105,11 @@ const swapsToCents = computed(
 )
 
 const numberText = computed(() =>
-  props.decimals > 0 ? props.modelValue.toFixed(props.decimals) : String(props.modelValue)
+  props.pitch
+    ? centString(props.modelValue, props.decimals)
+    : props.decimals > 0
+      ? props.modelValue.toFixed(props.decimals)
+      : String(props.modelValue)
 )
 
 const displayText = computed(() =>
@@ -161,35 +170,27 @@ function multiplier(event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boole
   return event.shiftKey ? FINE_MULTIPLIER : 1
 }
 
-function gcd(a: number, b: number): number {
-  return b ? gcd(b, a % b) : a
-}
-
-/** `n/d` as cents and the ratio to keep (null if it can't be kept), or undefined if not a ratio. */
-function parseRatio(text: string): { cents: number; kept: Ratio | null } | undefined {
-  const slash = text.indexOf('/')
-  if (slash < 0) {
-    return undefined
-  }
-  const numText = text.slice(0, slash).trim()
-  const denText = text.slice(slash + 1).trim()
-  if (!NUMBER_PATTERN.test(numText) || !NUMBER_PATTERN.test(denText)) {
-    return undefined
-  }
-  const num = parseFloat(numText)
-  const den = parseFloat(denText)
-  if (!(num > 0 && den > 0)) {
-    return undefined
-  }
-  const cents = 1200 * Math.log2(num / den)
-  let kept: Ratio | null = null
-  if (Number.isInteger(num) && Number.isInteger(den)) {
-    const divisor = gcd(num, den)
-    if (num / divisor <= MAX_RATIO_TERM && den / divisor <= MAX_RATIO_TERM) {
-      kept = [num / divisor, den / divisor]
+/**
+ * A pitch field's typed text as cents and the ratio to keep (null if it isn't one), or undefined
+ * if SonicWeave can't read it as a pitch. `ratioSpelled`: typed as a ratio or bare number.
+ */
+function parsePitch(
+  text: string
+): { cents: number; kept: Ratio | null; ratioSpelled: boolean } | undefined {
+  try {
+    const interval = parseInterval(text)
+    const cents = interval.totalCents()
+    if (!Number.isFinite(cents)) {
+      return undefined
     }
+    return {
+      cents,
+      kept: smallRatio(interval, MAX_RATIO_TERM),
+      ratioSpelled: interval.domain === 'linear'
+    }
+  } catch {
+    return undefined
   }
-  return { cents, kept }
 }
 
 // --- Pointer ---
@@ -310,7 +311,11 @@ function onKeydown(event: KeyboardEvent) {
     if (isEditing.value) {
       editText.value = editText.value.slice(0, -1)
     }
-  } else if (/^[0-9.-]$/.test(event.key) || (props.pitch && event.key === '/')) {
+  } else if (
+    /^[0-9.-]$/.test(event.key) ||
+    // Once typing, a pitch field takes any SonicWeave character (`/`, `\`, `,`, `c`, ...).
+    (props.pitch && isEditing.value && event.key.length === 1)
+  ) {
     if (isEditing.value) {
       editText.value += event.key
     } else {
@@ -333,11 +338,13 @@ function commitEdit() {
   }
   const typed = editText.value.trim()
   // A failed parse keeps the old value.
-  const ratio = props.pitch ? parseRatio(typed) : undefined
-  if (ratio) {
-    // Refused, not clamped, outside the range: the ratio typed is not the one a clamp keeps.
-    if (ratio.cents >= props.min && ratio.cents <= props.max) {
-      setValueInteractive(ratio.cents, ratio.kept)
+  if (props.pitch) {
+    const pitch = parsePitch(typed)
+    // A ratio outside the range is refused, not clamped: the ratio typed is not the one a clamp
+    // keeps. Typed cents are clamped like a drag.
+    const inRange = !!pitch && pitch.cents >= props.min && pitch.cents <= props.max
+    if (pitch && (inRange || !pitch.ratioSpelled)) {
+      setValueInteractive(pitch.cents, pitch.kept)
     }
   } else if (NUMBER_PATTERN.test(typed)) {
     setValueInteractive(parseFloat(typed))

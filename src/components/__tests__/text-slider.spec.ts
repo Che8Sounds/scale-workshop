@@ -193,7 +193,6 @@ describe('TextSlider pitch field', () => {
       min: 1,
       max: 9600,
       decimals: 3,
-      unit: '¢',
       pitch: true,
       ratio: [2, 1],
       defaultRatio: [2, 1],
@@ -220,7 +219,7 @@ describe('TextSlider pitch field', () => {
     await nextTick()
   }
 
-  it('shows a kept ratio without a unit', () => {
+  it('shows a kept ratio as the ratio', () => {
     const el = mountPitch()
     expect(el.textContent?.trim()).toBe('2/1')
   })
@@ -229,7 +228,7 @@ describe('TextSlider pitch field', () => {
     const el = mountPitch()
     el.dispatchEvent(new PointerEvent('pointerenter'))
     await nextTick()
-    expect(el.textContent?.replace(/\s+/g, '')).toBe('1200.000¢')
+    expect(el.textContent?.trim()).toBe('1200.000')
     el.dispatchEvent(new PointerEvent('pointerleave'))
     await nextTick()
     expect(el.textContent?.trim()).toBe('2/1')
@@ -245,26 +244,58 @@ describe('TextSlider pitch field', () => {
     expect(el.textContent?.trim()).toBe('3/2')
   })
 
-  it('applies a non-whole ratio as cents', async () => {
+  it('shows cents with a point, Scala style, even without decimals', () => {
+    const el = mountPitch({ decimals: 0, ratio: null })
+    expect(el.textContent?.trim()).toBe('1200.')
+  })
+
+  it('reads a number with a point as cents', async () => {
     const el = mountPitch()
     el.focus()
-    await type(el, '3.5/2')
+    await type(el, '702.')
+    expect(lastPitch()).toEqual([702, null])
+    expect(el.textContent?.trim()).toBe('702.000')
+  })
+
+  it('reads a bare number as a ratio over 1', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '3')
     const [cents, ratio] = lastPitch()!
-    expect(cents).toBeCloseTo(1200 * Math.log2(1.75), 6)
+    expect(cents).toBeCloseTo(1901.955, 3)
+    expect(ratio).toEqual([3, 1])
+    expect(el.textContent?.trim()).toBe('3/1')
+  })
+
+  it('applies other SonicWeave pitches as cents', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '7\\12')
+    const [cents, ratio] = lastPitch()!
+    expect(cents).toBeCloseTo(700, 9)
     expect(ratio).toBeNull()
   })
 
-  it('reads a bare number as cents', async () => {
+  it('keeps the old value when the text is not a pitch', async () => {
     const el = mountPitch()
     el.focus()
-    await type(el, '702')
-    expect(lastPitch()).toEqual([702, null])
+    await type(el, '3//')
+    expect(pitches()).toEqual([])
+    expect(el.textContent?.trim()).toBe('2/1')
+  })
+
+  it('clamps typed cents to the range', async () => {
+    const el = mountPitch()
+    el.focus()
+    await type(el, '9700.')
+    expect(lastPitch()).toEqual([9600, null])
   })
 
   it('refuses a ratio outside the range instead of clamping it', async () => {
     const el = mountPitch()
     el.focus()
     await type(el, '1000/1')
+    await type(el, '1000')
     expect(pitches()).toEqual([])
     expect(el.textContent?.trim()).toBe('2/1')
   })
